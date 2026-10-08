@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#define	_USE_MATH_DEFINES
 #include <math.h>
 #include <inttypes.h>
 #include "iso_8601_date.h"
@@ -18,6 +19,9 @@ volatile uint32_t RTC_seconds_since_epoch = 0;
 
 #define	START_DAY_OF_2100	29220
 #define	END_DAY_OF_2100		29584
+
+#define d2r(degrees) ((degrees) * M_PI / 180.0)
+#define r2d(radians) ((radians) * 180.0 / M_PI)
 
 
 static inline uint8_t mod7_u16(uint16_t n)
@@ -558,4 +562,76 @@ uint32_t RTC_add_seconds(uint32_t seconds_since_epoch, int32_t addend)
 	else
 		seconds_since_epoch += addend;
 	return seconds_since_epoch;
+}
+
+/*****************************************************************************
+* Convert time to Julian calendar day and century. Output parameters can be
+* NULL.
+*/
+void RTC_seconds_since_epoch_to_julian(uint32_t seconds_since_epoch, double *jday, double *jcentury, uint16_t *days_since_epoch)
+{
+	uint16_t dse = RTC_days_since_epoch(seconds_since_epoch);
+	uint32_t day_seconds = seconds_since_epoch - (dse * SECONDS_PER_DAY);
+	double fraction_of_day = (double)day_seconds / SECONDS_PER_DAY;
+	double julian_day = dse + 2458849.5 + fraction_of_day; // +0.5;
+	double julian_century = (julian_day - 2451545.0) / 36525.0;
+	if (jday)
+		*jday = julian_day;
+	if (jcentury)
+		*jcentury = julian_century;
+	if (days_since_epoch)
+		*days_since_epoch = dse;
+}
+
+/*****************************************************************************
+* Get sunrise, sunset, and solar noon times. Output parameters can be NULL.
+* Based on NOAA spreadsheets:
+* https://gml.noaa.gov/grad/solcalc/calcdetails.html
+*/
+void RTC_get_solar_times(uint32_t seconds_since_epoch, double lat_deg, double lon_deg,
+	uint32_t* sunrise, uint32_t* sunset, uint32_t* solar_noon)
+{
+	uint16_t days_since_epoch;
+	double julian_century;
+	seconds_since_epoch = (seconds_since_epoch / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+	seconds_since_epoch += SECONDS_PER_DAY / 2;			// use 12:00:00 on this day
+	RTC_seconds_since_epoch_to_julian(seconds_since_epoch, NULL, &julian_century, &days_since_epoch);
+	double geo_mean_long_sun_deg = fmod(280.46646 + julian_century * (36000.76983 + julian_century * 0.0003032), 360);
+	double geo_mean_anom_sun_deg = 357.52911 + julian_century * (35999.05029 - 0.0001537 * julian_century);
+	double eccent_earth_orbit = 0.016708634 - julian_century * (0.000042037 + 0.0000001267 * julian_century);
+	double sun_eq_of_ctr = sin(d2r(geo_mean_anom_sun_deg)) * (1.914602 - julian_century * (0.004817 + 0.000014 * julian_century)) + sin(d2r(2 * geo_mean_anom_sun_deg)) * (0.019993 - 0.000101 * julian_century) + sin(d2r(3 * geo_mean_anom_sun_deg)) * 0.000289;
+	double sun_true_long_deg = geo_mean_long_sun_deg + sun_eq_of_ctr;
+	double sun_app_long_deg = sun_true_long_deg - 0.00569 - 0.00478 * sin(d2r(125.04 - 1934.136 * julian_century));
+	double mean_obliq_ecliptic_deg = 23 + (26 + ((21.448 - julian_century * (46.815 + julian_century * (0.00059 - julian_century * 0.001813)))) / 60) / 60;
+	double obliq_corr_deg = mean_obliq_ecliptic_deg + 0.00256 * cos(d2r(125.04 - 1934.136 * julian_century));
+	double sun_declin_deg = r2d(asin(sin(d2r(obliq_corr_deg)) * sin(d2r(sun_app_long_deg))));
+	double var_y = tan(d2r(obliq_corr_deg / 2)) * tan(d2r(obliq_corr_deg / 2));
+	double eq_of_time = 4 * r2d(var_y * sin(2 * d2r(geo_mean_long_sun_deg)) - 2 * eccent_earth_orbit * sin(d2r(geo_mean_anom_sun_deg)) + 4 * eccent_earth_orbit * var_y * sin(d2r(geo_mean_anom_sun_deg)) * cos(2 * d2r(geo_mean_long_sun_deg)) - 0.5 * var_y * var_y * sin(4 * d2r(geo_mean_long_sun_deg)) - 1.25 * eccent_earth_orbit * eccent_earth_orbit * sin(2 * d2r(geo_mean_anom_sun_deg)));
+	double ha_sunrise_deg = r2d(acos(cos(d2r(90.833)) / (cos(d2r(lat_deg)) * cos(d2r(sun_declin_deg))) - tan(d2r(lat_deg)) * tan(d2r(sun_declin_deg))));
+	double solar_noon_lst_mins = (720 - 4 * lon_deg - eq_of_time) / 1440;
+	double sunrise_lst_mins = (solar_noon_lst_mins * 1440 - ha_sunrise_deg * 4) / 1440;
+	double sunset_lst_mins = (solar_noon_lst_mins * 1440 + ha_sunrise_deg * 4) / 1440;
+/*
+	printf("\n");
+	//printf("julian_day = %.17g\n", julian_day);
+	printf("julian_century = %.17g\n", julian_century);
+	printf("geo_mean_long_sun_deg = %.17g\n", geo_mean_long_sun_deg);
+	printf("geo_mean_anom_sun_deg = %.17g\n", geo_mean_anom_sun_deg);
+	printf("eccent_earth_orbit = %.17g\n", eccent_earth_orbit);
+	printf("sun_eq_of_ctr = %.17g\n", sun_eq_of_ctr);
+	printf("sun_true_long_deg = %.17g\n", sun_true_long_deg);
+	printf("sun_app_long_deg = %.17g\n", sun_app_long_deg);
+	printf("mean_obliq_ecliptic_deg = %.17g\n", mean_obliq_ecliptic_deg);
+	printf("obliq_corr_deg = %.17g\n", obliq_corr_deg);
+	printf("sun_declin_deg = %.17g\n", sun_declin_deg);
+	printf("var_y = %.17g\n", var_y);
+	printf("eq_of_time = %.17g\n", eq_of_time);
+	printf("ha_sunrise_deg = %.17g\n", ha_sunrise_deg);
+*/
+	if (solar_noon)
+		*solar_noon = (int64_t)(days_since_epoch * SECONDS_PER_DAY) + (solar_noon_lst_mins * SECONDS_PER_DAY);
+	if (sunrise)
+		*sunrise = (int64_t)(days_since_epoch * SECONDS_PER_DAY) + (sunrise_lst_mins * SECONDS_PER_DAY);
+	if (sunset)
+		*sunset = (int64_t)(days_since_epoch * SECONDS_PER_DAY) + (sunset_lst_mins * SECONDS_PER_DAY);
 }

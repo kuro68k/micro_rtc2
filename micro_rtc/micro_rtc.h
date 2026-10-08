@@ -140,3 +140,7 @@ extern bool RTC_is_in_eu_dst_bdt(const RTC_TIME_BD_t* bdt);
 // misc
 extern int8_t RTC_bd_compare(const RTC_TIME_BD_t* a, const RTC_TIME_BD_t* b);
 extern uint32_t RTC_add_seconds(uint32_t seconds_since_epoch, int32_t addend);
+
+extern void RTC_seconds_since_epoch_to_julian(uint32_t seconds_since_epoch, double* jday, double* jcentury, uint16_t* days_since_epoch);
+extern void RTC_get_solar_times(uint32_t seconds_since_epoch, double lat, double lon,
+	uint32_t *sunrise, uint32_t *sunset, uint32_t *solar_noon);

@@ -17,6 +17,7 @@
 #include "iso_8601_date.h"
 #include "micro_rtc.h"
 #include "build.h"
+#include "solar_times.h"
 
 #define	ARRAY_COUNT(arr) (sizeof(arr) / sizeof(arr[0]))
 
@@ -116,6 +117,56 @@ uint32_t make_time(const RTC_TIME_BD_t* bdt)
 	struct tm t = make_tm_bdt(bdt);
 	time_t time = mktime(&t);
 	return (uint32_t)time - RTC_UNIX_TIMESTAMP_AT_EPOCH;
+}
+
+int check_solar_times(uint32_t t, int *solar_times,
+	int32_t noon_adj, int32_t rise_adj, int32_t set_adj,
+	double lat, double lon)
+{
+	int errors = 0;
+	RTC_TIME_BD_t bdt;
+	for (int i = 0; i < 366; i++)
+	{
+		uint32_t rise, set, noon;
+		RTC_seconds_since_epoch_to_bd(t, &bdt);
+		bdt.hour = *solar_times++;
+		bdt.minute = *solar_times++;
+		bdt.second = *solar_times++;
+		uint32_t target_noon = RTC_bd_to_seconds_since_epoch(&bdt);
+		target_noon += noon_adj;
+		bdt.hour = *solar_times++;
+		bdt.minute = *solar_times++;
+		bdt.second = *solar_times++;
+		uint32_t target_rise = RTC_bd_to_seconds_since_epoch(&bdt);
+		target_rise += rise_adj;
+		bdt.hour = *solar_times++;
+		bdt.minute = *solar_times++;
+		bdt.second = *solar_times++;
+		uint32_t target_set = RTC_bd_to_seconds_since_epoch(&bdt);
+		target_set += set_adj;
+
+		RTC_get_solar_times(t, lat, lon, &rise, &set, &noon);
+		long long noon_error = (long long)noon - (long long)target_noon;
+		long long rise_error = (long long)rise - (long long)target_rise;
+		long long set_error = (long long)set - (long long)target_set;
+		//printf("noon error %lld, rise error %lld, set error %lld\n", noon_error, rise_error, set_error);
+		if ((llabs(noon_error) > 1) ||
+			(llabs(rise_error) > 1) ||
+			(llabs(set_error) > 1))
+		{
+			errors++;
+			printf("day %d, noon error %lld, rise error %lld, set error %lld\n", i, noon_error, rise_error, set_error);
+			RTC_seconds_since_epoch_to_bd(noon, &bdt);
+			printf("%02u:%02u:%02u,", bdt.hour, bdt.minute, bdt.second);
+			RTC_seconds_since_epoch_to_bd(rise, &bdt);
+			printf("%02u:%02u:%02u,", bdt.hour, bdt.minute, bdt.second);
+			RTC_seconds_since_epoch_to_bd(set, &bdt);
+			printf("%02u:%02u:%02u\n", bdt.hour, bdt.minute, bdt.second);
+			//return errors;
+		}
+		t += SECONDS_PER_DAY;
+	}
+	return errors;
 }
 
 int main(void)
@@ -366,6 +417,25 @@ int main(void)
 		}
 		year++;
 	}
+
+	printf("RTC_get_solar_times()\n");
+	RTC_TIME_BD_t bdt;
+	memset(&bdt, 0, sizeof(bdt));
+	bdt.year = 2020;
+	bdt.month = 1;
+	bdt.day = 1;
+	errors += check_solar_times(RTC_bd_to_seconds_since_epoch(&bdt),
+								solar_times_2020_0_0, 0, 0, 0, 0, 0);
+	bdt.year = 2026;
+	errors += check_solar_times(RTC_bd_to_seconds_since_epoch(&bdt),
+								solar_times_2026_tokyo,
+								0, -SECONDS_PER_DAY, 0,
+								35.6895, 139.69171);
+	bdt.year = 2155;
+	errors += check_solar_times(RTC_bd_to_seconds_since_epoch(&bdt),
+								solar_times_2155_vancouver,
+								0, 0, SECONDS_PER_DAY,
+								49.260833, -123.113889);
 
 	return errors;
 }

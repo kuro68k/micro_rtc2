@@ -4,7 +4,7 @@
 cmake_minimum_required (VERSION 3.8)
 
 # Add source to this project's executable.
-add_executable (micro_rtc "micro_rtc.c"   "dst_dates.h" "iso_8601_date.h"    "micro_rtc.h" "test.c" "build.c" "build.h")
+add_executable (micro_rtc "micro_rtc.c"   "dst_dates.h" "iso_8601_date.h"    "micro_rtc.h" "test.c" "build.c" "build.h" "solar_times.c" "solar_times.h")
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET micro_rtc PROPERTY CXX_STANDARD 20)

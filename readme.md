@@ -8,6 +8,8 @@
 * 32 bit second counter, good until 2099 or 2156 (configurable)
 * 1 second resolution
 * EU DST calculation
+* Sunrise, sunset, and solar noon calculation
+* Julian day calculation
 * Time handling utility functions
 * Build time and date utility functions
 * GPLv3 licence
